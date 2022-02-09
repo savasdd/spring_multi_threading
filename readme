@@ -1,0 +1,63 @@
+Bu uygulamanın amacı file olarak alınan kayıtların thread yapısı kullanılarak veritabanına kayıt edilmesi ve çekilmesidir. 
+Bunun için java util ComplatebleFuture özelliği kullanılacaktır. Veri tabanı olarak PostgreSQL kullanıldı.
+Önce Cofig ayarlaması yapılır.Executer bean olarak üretilir ve çalışacak thread sayısı ile kapasite durumları setlenir.
+
+----->Config
+@Configuration
+@EnableAsync
+public class AsyncConfig {
+
+    @Bean(name = "taskExe")
+    public Executor taskExe() {
+        ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
+        taskExecutor.setCorePoolSize(3);
+        taskExecutor.setMaxPoolSize(3);
+        taskExecutor.setQueueCapacity(100);
+        taskExecutor.setThreadNamePrefix("User Thread ");
+        taskExecutor.initialize();
+        return taskExecutor;
+    }
+}
+
+---->CSV
+RestController içinde CSV dosyası alınacak servis yazılır.
+@PostMapping(value = "/users", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = "application/json")
+public ResponseEntity saveUser(@RequestParam(value = "files") MultipartFile[] files) throws Exception
+
+---->Servis
+Oluşturulan User modeli kullanılarak servis içerisinde çoklu kayıt yapılır.
+Serviste gönderilen CSV dosyası parse edilir ve model alanları setlenir.
+JPA repository saveAll metotu kullanılarak liste olarak veritabanına gönderilir. 
+
+    @Async
+    public CompletableFuture<List<User>> save(MultipartFile file) throws Exception {
+        Long start = System.currentTimeMillis();
+        List<User> list = parseCSV(file);
+        log.info("User listesi => " + list.size() + " " + Thread.currentThread().getName());
+        list = repostory.saveAll(list);
+        Long end = System.currentTimeMillis();
+        log.info("Gecen Zaman: " + (end - start));
+        return CompletableFuture.completedFuture(list);
+    }
+
+    public List<User> parseCSV(MultipartFile file) throws Exception {
+        List<User> list = new ArrayList<>();
+        try {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream()))) {
+                String say;
+                while ((say = reader.readLine()) != null) {
+                    String[] data = say.split(",");
+                    User user = new User();
+                    user.setFirstName(data[1]);
+                    user.setLastName(data[2]);
+                    user.setEmail(data[3]);
+                    user.setGender(data[4]);
+                    user.setIpAddress(data[5]);
+                    list.add(user);
+                }
+                return list;
+            }
+        } catch (Exception e) {
+            throw new Exception("CSV File Hatası Oluştu..", e);
+        }
+    }
